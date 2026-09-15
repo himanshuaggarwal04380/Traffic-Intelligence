@@ -1,2626 +1,396 @@
-# TRAFFIC INTELLIGENCE
-# Premium Streamlit Traffic Forecasting Dashboard
-
-import sys
 from pathlib import Path
-
-# Streamlit only adds this script's own folder (app/) to the
-# import path, not the project root. Since src/ is a sibling
-# folder of app/, not inside it, "from src..." fails unless the
-# project root is added to the path manually first.
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parent.parent)
-)
-
-import streamlit as st
-import pandas as pd
-import numpy as np
-import json
 import base64
+import mimetypes
+import json
+import traceback
+import sys
 
-import plotly.graph_objects as go
+import pandas as pd
 import plotly.express as px
-
-from src.predict import predict_all_models
-
-
-# PAGE CONFIG
-
-st.set_page_config(
-    page_title="Traffic Intelligence",
-    page_icon="🚦",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-
-# PATHS
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-
-ASSETS_DIR = ROOT_DIR / "assets"
-ARTIFACTS_DIR = ROOT_DIR / "artifacts"
-
-METRICS_FILE = ARTIFACTS_DIR / "metrics.json"
-PREDICTIONS_FILE = ARTIFACTS_DIR / "test_predictions.csv"
-DAILY_TRAFFIC_FILE = ARTIFACTS_DIR / "daily_traffic.csv"
-
-# Support both names currently possible in your project
-BACKGROUND_IMAGE = ASSETS_DIR / "traffic_background.png"
-
-if not BACKGROUND_IMAGE.exists():
-    BACKGROUND_IMAGE = ASSETS_DIR / "traffic_background.png.png"
-
-
-# HTML RENDER HELPER
-#
-# IMPORTANT:
-# We use st.html() instead of st.markdown() for HTML.
-# This prevents Streamlit from displaying HTML as code.
-
-def render_html(content):
-    st.html(content)
-
-
-# BACKGROUND IMAGE
-
-def get_background_base64():
-
-    if not BACKGROUND_IMAGE.exists():
-        return ""
-
-    try:
-        with open(BACKGROUND_IMAGE, "rb") as image_file:
-            return base64.b64encode(
-                image_file.read()
-            ).decode("utf-8")
-
-    except Exception:
-        return ""
-
-
-background_base64 = get_background_base64()
-
-
-# GLOBAL CSS
-
-if background_base64:
-
-    background_rule = f"""
-        background-image:
-            linear-gradient(
-                rgba(2, 8, 20, 0.82),
-                rgba(2, 8, 20, 0.94)
-            ),
-            url("data:image/png;base64,{background_base64}");
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-    """
-
-else:
-
-    background_rule = """
-        background:
-            radial-gradient(
-                circle at 10% 10%,
-                rgba(0, 200, 255, 0.12),
-                transparent 30%
-            ),
-            radial-gradient(
-                circle at 90% 80%,
-                rgba(100, 60, 255, 0.12),
-                transparent 30%
-            ),
-            #020814;
-    """
-
-
-render_html(
-    f"""
-    <style>
-
-    /* ======================================================
-       MAIN APPLICATION
-       ====================================================== */
-
-    .stApp {{
-        {background_rule}
-
-        color: white;
-    }}
-
-
-    /* ======================================================
-       REMOVE DEFAULT STREAMLIT ELEMENTS
-       ====================================================== */
-
-    #MainMenu {{
-        visibility: hidden;
-    }}
-
-    footer {{
-        visibility: hidden;
-    }}
-
-    header {{
-        background: transparent !important;
-    }}
-
-
-    /* ======================================================
-       MAIN CONTAINER
-       ====================================================== */
-
-    .block-container {{
-        max-width: 1450px;
-
-        padding-top: 2rem;
-        padding-bottom: 4rem;
-    }}
-
-
-    /* ======================================================
-       SIDEBAR
-       ====================================================== */
-
-    section[data-testid="stSidebar"] {{
-        background:
-            linear-gradient(
-                180deg,
-                rgba(1, 12, 27, 0.98),
-                rgba(1, 6, 17, 0.99)
-            );
-
-        border-right:
-            1px solid rgba(255,255,255,0.08);
-    }}
-
-
-    /* ======================================================
-       SIDEBAR BRAND
-       ====================================================== */
-
-    .sidebar-brand {{
-        text-align: center;
-
-        padding:
-            15px 5px 20px 5px;
-    }}
-
-    .sidebar-logo {{
-        font-size: 46px;
-
-        line-height: 1;
-
-        margin-bottom: 10px;
-
-        filter:
-            drop-shadow(
-                0 0 14px
-                rgba(80,220,255,0.45)
-            );
-    }}
-
-    .sidebar-title {{
-        color: white;
-
-        font-size: 20px;
-
-        font-weight: 850;
-
-        letter-spacing: -0.5px;
-    }}
-
-    .sidebar-subtitle {{
-        color:
-            rgba(255,255,255,0.36);
-
-        font-size: 9px;
-
-        letter-spacing: 2px;
-
-        margin-top: 5px;
-    }}
-
-
-    /* ======================================================
-       HERO
-       ====================================================== */
-
-    .hero {{
-        position: relative;
-
-        overflow: hidden;
-
-        padding: 48px;
-
-        margin-bottom: 32px;
-
-        border-radius: 28px;
-
-        background:
-            linear-gradient(
-                135deg,
-                rgba(5,27,51,0.82),
-                rgba(3,11,29,0.72)
-            );
-
-        border:
-            1px solid
-            rgba(85,220,255,0.18);
-
-        box-shadow:
-            0 30px 90px
-            rgba(0,0,0,0.42);
-
-        backdrop-filter: blur(20px);
-    }}
-
-    .hero::before {{
-        content: "";
-
-        position: absolute;
-
-        width: 420px;
-        height: 420px;
-
-        right: -170px;
-        top: -230px;
-
-        border-radius: 50%;
-
-        background:
-            rgba(0,200,255,0.16);
-
-        filter: blur(80px);
-
-        animation:
-            floatingGlow 5s
-            ease-in-out
-            infinite alternate;
-    }}
-
-    .hero::after {{
-        content: "";
-
-        position: absolute;
-
-        width: 300px;
-        height: 300px;
-
-        left: -180px;
-        bottom: -230px;
-
-        border-radius: 50%;
-
-        background:
-            rgba(100,60,255,0.12);
-
-        filter: blur(80px);
-
-        animation:
-            floatingGlow 7s
-            ease-in-out
-            infinite alternate-reverse;
-    }}
-
-    @keyframes floatingGlow {{
-
-        0% {{
-            transform: scale(0.85);
-            opacity: 0.35;
-        }}
-
-        100% {{
-            transform: scale(1.15);
-            opacity: 0.9;
-        }}
-
-    }}
-
-    .hero-content {{
-        position: relative;
-
-        z-index: 2;
-    }}
-
-    .hero-eyebrow {{
-        color: #5cddff;
-
-        font-size: 11px;
-
-        font-weight: 850;
-
-        letter-spacing: 3px;
-
-        margin-bottom: 14px;
-    }}
-
-    .hero-title {{
-        color: white;
-
-        font-size: 56px;
-
-        font-weight: 900;
-
-        letter-spacing: -2.5px;
-
-        line-height: 1;
-
-        margin: 0;
-    }}
-
-    .hero-subtitle {{
-        max-width: 790px;
-
-        color:
-            rgba(255,255,255,0.58);
-
-        font-size: 15px;
-
-        line-height: 1.7;
-
-        margin-top: 20px;
-    }}
-
-    .online-badge {{
-        display: inline-flex;
-
-        align-items: center;
-
-        gap: 9px;
-
-        margin-top: 22px;
-
-        padding:
-            8px 14px;
-
-        border-radius: 999px;
-
-        color: #61f3bd;
-
-        background:
-            rgba(0,230,160,0.07);
-
-        border:
-            1px solid
-            rgba(0,240,180,0.20);
-
-        font-size: 10px;
-
-        font-weight: 850;
-
-        letter-spacing: 1.2px;
-    }}
-
-    .online-dot {{
-        width: 7px;
-        height: 7px;
-
-        border-radius: 50%;
-
-        background: #45f3b3;
-
-        box-shadow:
-            0 0 10px
-            #45f3b3;
-
-        animation:
-            statusPulse 1.8s
-            infinite;
-    }}
-
-    @keyframes statusPulse {{
-
-        0% {{
-            box-shadow:
-                0 0 0 0
-                rgba(69,243,179,0.5);
-        }}
-
-        70% {{
-            box-shadow:
-                0 0 0 9px
-                rgba(69,243,179,0);
-        }}
-
-        100% {{
-            box-shadow:
-                0 0 0 0
-                rgba(69,243,179,0);
-        }}
-
-    }}
-
-
-    /* ======================================================
-       SECTION
-       ====================================================== */
-
-    .section-title {{
-        color: white;
-
-        font-size: 26px;
-
-        font-weight: 850;
-
-        margin-top: 30px;
-
-        margin-bottom: 4px;
-    }}
-
-    .section-description {{
-        color:
-            rgba(255,255,255,0.38);
-
-        font-size: 12px;
-
-        margin-bottom: 20px;
-    }}
-
-
-    /* ======================================================
-       GLASS CARD
-       ====================================================== */
-
-    .glass-card {{
-        background:
-            linear-gradient(
-                145deg,
-                rgba(7,28,51,0.82),
-                rgba(2,12,28,0.74)
-            );
-
-        border:
-            1px solid
-            rgba(255,255,255,0.08);
-
-        border-radius: 20px;
-
-        padding: 23px;
-
-        backdrop-filter: blur(16px);
-
-        box-shadow:
-            0 15px 45px
-            rgba(0,0,0,0.20);
-
-        transition:
-            transform 0.25s ease,
-            border-color 0.25s ease,
-            box-shadow 0.25s ease;
-    }}
-
-    .glass-card:hover {{
-        transform:
-            translateY(-5px);
-
-        border-color:
-            rgba(80,220,255,0.25);
-
-        box-shadow:
-            0 25px 65px
-            rgba(0,0,0,0.34);
-    }}
-
-
-    /* ======================================================
-       MODEL CARD
-       ====================================================== */
-
-    .model-card {{
-        min-height: 155px;
-
-        padding: 22px;
-
-        border-radius: 20px;
-
-        background:
-            linear-gradient(
-                145deg,
-                rgba(8,31,55,0.85),
-                rgba(3,13,29,0.75)
-            );
-
-        border:
-            1px solid
-            rgba(255,255,255,0.08);
-
-        backdrop-filter: blur(15px);
-
-        transition:
-            all 0.3s ease;
-    }}
-
-    .model-card:hover {{
-        transform:
-            translateY(-7px)
-            scale(1.015);
-
-        border-color:
-            rgba(75,220,255,0.35);
-
-        box-shadow:
-            0 20px 55px
-            rgba(0,0,0,0.35);
-    }}
-
-    .model-name {{
-        color:
-            rgba(255,255,255,0.48);
-
-        font-size: 10px;
-
-        font-weight: 850;
-
-        letter-spacing: 1.7px;
-
-        text-transform: uppercase;
-    }}
-
-    .model-value {{
-        color: white;
-
-        font-size: 32px;
-
-        font-weight: 900;
-
-        margin-top: 13px;
-    }}
-
-    .model-description {{
-        color:
-            rgba(255,255,255,0.36);
-
-        font-size: 10px;
-
-        line-height: 1.5;
-
-        margin-top: 6px;
-    }}
-
-
-    /* ======================================================
-       BEST MODEL
-       ====================================================== */
-
-    .best-model {{
-        position: relative;
-
-        overflow: hidden;
-
-        padding: 24px 28px;
-
-        margin:
-            25px 0 30px 0;
-
-        border-radius: 21px;
-
-        background:
-            linear-gradient(
-                135deg,
-                rgba(0,210,160,0.12),
-                rgba(0,130,255,0.08)
-            );
-
-        border:
-            1px solid
-            rgba(0,240,190,0.22);
-
-        backdrop-filter: blur(15px);
-    }}
-
-    .best-model::after {{
-        content: "";
-
-        position: absolute;
-
-        width: 160px;
-        height: 160px;
-
-        right: -80px;
-        top: -80px;
-
-        border-radius: 50%;
-
-        background:
-            rgba(0,240,180,0.10);
-
-        filter: blur(25px);
-    }}
-
-    .best-label {{
-        color: #5ef3bd;
-
-        font-size: 10px;
-
-        font-weight: 900;
-
-        letter-spacing: 2px;
-    }}
-
-    .best-name {{
-        color: white;
-
-        font-size: 29px;
-
-        font-weight: 900;
-
-        margin-top: 5px;
-    }}
-
-    .best-description {{
-        color:
-            rgba(255,255,255,0.43);
-
-        font-size: 12px;
-
-        margin-top: 5px;
-    }}
-
-
-    /* ======================================================
-       BUTTONS
-       ====================================================== */
-
-    .stButton > button {{
-        min-height: 48px;
-
-        border-radius: 14px;
-
-        color: white;
-
-        background:
-            linear-gradient(
-                135deg,
-                rgba(0,180,255,0.20),
-                rgba(105,65,255,0.20)
-            );
-
-        border:
-            1px solid
-            rgba(75,215,255,0.28);
-
-        font-weight: 850;
-
-        transition:
-            all 0.25s ease;
-    }}
-
-    .stButton > button:hover {{
-        transform:
-            translateY(-3px);
-
-        border-color:
-            rgba(80,225,255,0.60);
-
-        box-shadow:
-            0 12px 35px
-            rgba(0,170,255,0.18);
-    }}
-
-
-    /* ======================================================
-       METRICS
-       ====================================================== */
-
-    div[data-testid="stMetric"] {{
-        padding: 21px;
-
-        border-radius: 19px;
-
-        background:
-            linear-gradient(
-                145deg,
-                rgba(8,29,51,0.82),
-                rgba(3,13,28,0.74)
-            );
-
-        border:
-            1px solid
-            rgba(255,255,255,0.08);
-
-        backdrop-filter:
-            blur(14px);
-
-        transition:
-            transform 0.25s ease,
-            border-color 0.25s ease;
-    }}
-
-    div[data-testid="stMetric"]:hover {{
-        transform:
-            translateY(-4px);
-
-        border-color:
-            rgba(80,220,255,0.28);
-    }}
-
-    div[data-testid="stMetricLabel"] {{
-        color:
-            rgba(255,255,255,0.43)
-            !important;
-
-        font-size: 11px
-            !important;
-
-        font-weight: 750
-            !important;
-    }}
-
-    div[data-testid="stMetricValue"] {{
-        color: white
-            !important;
-
-        font-weight: 900
-            !important;
-    }}
-
-
-    /* ======================================================
-       SELECTBOX
-       ====================================================== */
-
-    div[data-baseweb="select"] > div {{
-        background:
-            rgba(4,17,33,0.88)
-            !important;
-
-        border:
-            1px solid
-            rgba(255,255,255,0.10)
-            !important;
-
-        border-radius:
-            12px
-            !important;
-    }}
-
-
-    /* ======================================================
-       TABS
-       ====================================================== */
-
-    button[data-baseweb="tab"] {{
-        color:
-            rgba(255,255,255,0.43);
-
-        font-weight: 750;
-    }}
-
-    button[data-baseweb="tab"][aria-selected="true"] {{
-        color: #5edcff;
-    }}
-
-
-    /* ======================================================
-       DATAFRAME
-       ====================================================== */
-
-    div[data-testid="stDataFrame"] {{
-        border-radius: 15px;
-
-        overflow: hidden;
-
-        border:
-            1px solid
-            rgba(255,255,255,0.07);
-    }}
-
-
-    /* ======================================================
-       INFO / SUCCESS / ERROR
-       ====================================================== */
-
-    div[data-testid="stAlert"] {{
-        border-radius: 14px;
-    }}
-
-
-    /* ======================================================
-       FOOTER
-       ====================================================== */
-
-    .footer {{
-        text-align: center;
-
-        color:
-            rgba(255,255,255,0.25);
-
-        font-size: 10px;
-
-        margin-top: 65px;
-
-        padding-top: 25px;
-
-        border-top:
-            1px solid
-            rgba(255,255,255,0.06);
-
-        line-height: 1.8;
-    }}
-
-    </style>
-    """
-)
-
-
-# DATA LOADING
-
-@st.cache_data
-def load_metrics():
-
-    if not METRICS_FILE.exists():
-        return {}
-
-    try:
-
-        with open(
-            METRICS_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            return json.load(file)
-
-    except Exception:
-
-        return {}
-
-
-@st.cache_data
-def load_predictions():
-
-    if not PREDICTIONS_FILE.exists():
-        return pd.DataFrame()
-
-    try:
-
-        return pd.read_csv(
-            PREDICTIONS_FILE
-        )
-
-    except Exception:
-
-        return pd.DataFrame()
-
-
-@st.cache_data
-def load_daily_data():
-
-    if not DAILY_TRAFFIC_FILE.exists():
-        return pd.DataFrame()
-
-    try:
-
-        df = pd.read_csv(
-            DAILY_TRAFFIC_FILE
-        )
-
-        for column in [
-            "date_time",
-            "date",
-            "ds"
-        ]:
-
-            if column in df.columns:
-
-                df[column] = pd.to_datetime(
-                    df[column],
-                    errors="coerce"
-                )
-
-                break
-
-        return df
-
-    except Exception:
-
-        return pd.DataFrame()
-
-
-# HELPERS
-
-def get_metric(
-    metrics,
-    model,
-    metric
-):
-
-    try:
-
-        value = metrics[
-            model
-        ][
-            metric
-        ]
-
-        if value is None:
-            return None
-
-        return float(value)
-
-    except Exception:
-
+import plotly.graph_objects as go
+import streamlit as st
+
+st.set_page_config(page_title="Traffic Intelligence", page_icon="🚦", layout="wide", initial_sidebar_state="expanded")
+
+# Resolve the project root reliably, even when Streamlit is launched from the app folder.
+HERE = Path(__file__).resolve().parent
+PROJECT_CANDIDATES = [HERE, HERE.parent, Path.cwd(), Path.cwd().parent]
+ROOT = next((p for p in PROJECT_CANDIDATES if (p / "data" / "raw").exists()), HERE.parent)
+
+# Make the project root importable even when Streamlit is launched from app/.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+DATA_PATH = ROOT / "data" / "raw" / "Metro_Interstate_Traffic_Volume.csv"
+DAILY_PATH = ROOT / "artifacts" / "daily_traffic.csv"
+METRICS_PATH = ROOT / "artifacts" / "metrics.json"
+PREDICTIONS_PATH = ROOT / "artifacts" / "test_predictions.csv"
+
+# The app accepts the old filename too. It also searches the assets folder so
+# the background keeps working whether the app is started from the project
+# root or with `streamlit run app.py` from inside the app folder.
+def find_background():
+    assets = ROOT / "assets"
+    if not assets.exists():
         return None
 
+    preferred = [
+        "traffic_background.png",
+        "traffic_background.png.png",
+        "traffic_background.jpg",
+        "traffic_background.jpeg",
+        "traffic_background.webp",
+    ]
+    for name in preferred:
+        candidate = assets / name
+        if candidate.is_file():
+            return candidate
 
-def format_number(value):
+    for candidate in sorted(assets.iterdir()):
+        if candidate.is_file() and candidate.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            return candidate
+    return None
 
-    if value is None:
-        return "—"
+BG_PATH = find_background()
 
+st.html("""
+<style>
+.stApp{background:#0b0d10;color:#f5f7fa}.block-container{max-width:1180px;padding-top:2.2rem;padding-bottom:4rem}
+[data-testid="stSidebar"]{background:#0b0d10!important;border-right:1px solid rgba(255,255,255,.07)!important}
+[data-testid="stSidebar"]>div:first-child{padding:.75rem .65rem}
+[data-testid="stSidebarContent"]{padding:0!important}
+.sidebar-brand{padding:1.15rem .55rem 2.1rem}
+.sidebar-logo{
+    display:block;
+    color:#fff;
+    font-size:1.8rem;
+    font-weight:800;
+    letter-spacing:-.02em;
+    line-height:1.15
+}
+.sidebar-logo-mark{display:none}
+.sidebar-sub{display:none}
+[data-testid="stSidebar"] .stRadio>label{display:none}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"]{gap:3px}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"]>label{position:relative;border-radius:10px;padding:.72rem .75rem;color:#aeb5c0;min-height:43px;display:flex;align-items:center;font-size:.88rem;font-weight:520;transition:color .15s ease,opacity .15s ease;background:transparent!important;box-shadow:none!important}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"]>label>div:first-child{display:none}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"]>label:hover{background:transparent!important;color:#fff}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"]>label:has(input:checked){background:transparent!important;color:#fff;font-weight:700;box-shadow:none!important}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"]>label:has(input:checked):before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:20px;border-radius:3px;background:#fff}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] p{margin:0!important;padding-left:0!important}
+
+.stButton>button{border-radius:9px;background:#171b21;border:1px solid rgba(255,255,255,.12);color:#fff;min-height:42px}
+[data-testid="stMetric"]{background:#11151a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:1rem}
+.section-title{font-size:1.2rem;font-weight:650;margin:1.6rem 0 .25rem}.muted{color:#929ba8;font-size:.88rem;line-height:1.5}
+.hero{position:relative;min-height:355px;display:flex;align-items:flex-end;overflow:hidden;border:1px solid rgba(255,255,255,.08);border-radius:18px;margin-bottom:1.5rem;background:#090b0e}
+.hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;display:block;z-index:0}
+.hero-overlay{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(7,9,12,.60),rgba(7,9,12,.35) 45%,rgba(7,9,12,.06)),linear-gradient(0deg,rgba(7,9,12,.50),transparent 70%)}
+.hero-content{position:relative;z-index:2;padding:2.2rem;max-width:700px}.eyebrow{color:#a9b4c3;text-transform:uppercase;letter-spacing:.14em;font-size:.72rem;font-weight:700;margin-bottom:.7rem}
+.hero h1{font-size:clamp(2.3rem,5vw,4.2rem);line-height:1;letter-spacing:-.045em;margin:0 0 1rem;color:#fff}.hero p{color:#c0c7d1;font-size:1rem;line-height:1.6;margin:0}
+.pill{display:inline-flex;align-items:center;gap:.45rem;margin-top:1.2rem;padding:.45rem .7rem;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);border-radius:999px;color:#d7dde5;font-size:.78rem}.dot{width:7px;height:7px;border-radius:50%;background:#6ee7a0;box-shadow:0 0 12px rgba(110,231,160,.6)}
+.card{background:#11151a;border:1px solid rgba(255,255,255,.07);border-radius:13px;padding:1.1rem;height:100%}.card .title{font-weight:650;color:#fff;margin:.35rem 0}.card .text{color:#919ba8;font-size:.86rem;line-height:1.45}
+.result{background:linear-gradient(135deg,#141920,#101318);border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:1.5rem;text-align:center}.result-label{color:#8f99a7;font-size:.75rem;text-transform:uppercase;letter-spacing:.12em}.result-number{color:#fff;font-size:3rem;font-weight:750;letter-spacing:-.04em;margin:.35rem 0}.result-sub{color:#9ca6b3;font-size:.85rem}
+.flow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}.flow span{padding:.5rem .75rem;border-radius:8px;background:#14181e;border:1px solid rgba(255,255,255,.07);font-size:.82rem}.flow b{color:#687382;font-weight:400}
+#MainMenu,footer{visibility:hidden}header{background:transparent!important}
+</style>
+""")
+
+
+def card(icon, title, text):
+    st.html(f'<div class="card"><div>{icon}</div><div class="title">{title}</div><div class="text">{text}</div></div>')
+
+
+def model_card(name, kind, text):
+    st.html(f'<div class="card"><div class="title">{name}</div><div style="color:#8f99a7;font-size:.8rem">{kind}</div><div class="text" style="margin-top:.65rem">{text}</div></div>')
+
+
+@st.cache_data(show_spinner=False)
+def raw_data():
+    df = pd.read_csv(DATA_PATH)
+    df["date_time"] = pd.to_datetime(df["date_time"], errors="coerce")
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def daily_data():
+    if DAILY_PATH.exists():
+        df = pd.read_csv(DAILY_PATH)
+        dc = next((c for c in df.columns if c.lower() in {"date", "date_time", "ds"}), None)
+        if dc:
+            df[dc] = pd.to_datetime(df[dc], errors="coerce")
+            if dc != "date": df = df.rename(columns={dc: "date"})
+        return df
+    raw = raw_data()
+    return (raw.dropna(subset=["date_time"]).set_index("date_time")["traffic_volume"].resample("D").mean().rename("traffic_volume").reset_index().rename(columns={"date_time":"date"}))
+
+
+@st.cache_data(show_spinner=False)
+def metrics():
+    if not METRICS_PATH.exists(): return {}
     try:
-
-        return f"{float(value):,.0f}"
-
-    except Exception:
-
-        return "—"
+        return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
+    except Exception: return {}
 
 
-def get_date_column(df):
+@st.cache_data(show_spinner=False)
+def test_predictions():
+    return pd.read_csv(PREDICTIONS_PATH) if PREDICTIONS_PATH.exists() else None
 
-    for column in [
-        "date_time",
-        "date",
-        "ds"
-    ]:
 
-        if column in df.columns:
-            return column
+def col(df, names):
+    if df is None: return None
+    lookup = {c.lower(): c for c in df.columns}
+    return next((lookup[n.lower()] for n in names if n.lower() in lookup), None)
 
+
+def score(metrics_obj, model, metric):
+    for key in (model, model.lower(), model.upper()):
+        obj = metrics_obj.get(key, {}) if isinstance(metrics_obj, dict) else {}
+        if isinstance(obj, dict):
+            for k in (metric, metric.lower(), metric.upper()):
+                if k in obj:
+                    try: return float(obj[k])
+                    except Exception: pass
     return None
 
 
-def get_actual_column(df):
-
-    for column in [
-        "actual",
-        "traffic_volume",
-        "y",
-        "Actual"
-    ]:
-
-        if column in df.columns:
-            return column
-
-    return None
-
-
-# LOAD DATA
-
-metrics = load_metrics()
-
-test_predictions = load_predictions()
-
-daily_data = load_daily_data()
-
-
-MODELS = [
-    "ARIMA",
-    "SARIMA",
-    "Prophet",
-    "XGBoost",
-]
+def normalize_predictions(result):
+    names = ["ARIMA", "SARIMA", "Prophet", "XGBoost"]
+    out = {}
+    if isinstance(result, dict):
+        for name in names:
+            value = None
+            for key in (name, name.lower(), name.upper()):
+                if key in result:
+                    value = result[key]; break
+            if isinstance(value, dict):
+                for k in ("prediction", "forecast", "value", "yhat"):
+                    if k in value: value = value[k]; break
+            try:
+                if hasattr(value, "iloc"): value = value.iloc[-1]
+                elif hasattr(value, "__len__") and not isinstance(value, (str, bytes)): value = value[-1]
+                out[name] = float(value)
+            except Exception: pass
+    elif isinstance(result, pd.DataFrame):
+        mc, vc = col(result,["model"]), col(result,["prediction","forecast","value","yhat"])
+        if mc and vc:
+            for _, r in result.iterrows():
+                for name in names:
+                    if str(r[mc]).lower() == name.lower():
+                        try: out[name] = float(r[vc])
+                        except Exception: pass
+    return out
 
 
-available_models = [
-    model
-    for model in MODELS
-    if model in metrics
-]
-
-
-# BEST MODEL
-
-best_model = None
-best_mae = None
-
-for model in available_models:
-
-    mae = get_metric(
-        metrics,
-        model,
-        "MAE"
-    )
-
-    if mae is None:
-        continue
-
-    if (
-        best_mae is None
-        or mae < best_mae
-    ):
-
-        best_mae = mae
-        best_model = model
-
-
-# SIDEBAR
-
+# Sidebar — minimal navigation.
 with st.sidebar:
-
-    render_html(
-        """
+    st.html("""
         <div class="sidebar-brand">
-
-            <div class="sidebar-logo">
-                🚦
-            </div>
-
-            <div class="sidebar-title">
-                Traffic Intelligence
-            </div>
-
-            <div class="sidebar-subtitle">
-                AI FORECASTING PLATFORM
-            </div>
-
+            <div class="sidebar-logo">Traffic<br>Intelligence</div>
         </div>
-        """
-    )
-
-    st.divider()
-
-    st.markdown(
-        "### ⚙️ Dashboard"
-    )
+    """)
 
     page = st.radio(
         "Navigation",
-        [
-            "Overview",
-            "Forecast",
-            "Model Evaluation",
-            "Diagnostics",
-        ],
+        ["Overview", "Data Analysis", "Model Analysis", "Next-Day Result", "Diagnostics"],
         label_visibility="collapsed",
     )
 
-    st.divider()
+
+# ============================================================
+# OVERVIEW
+# ============================================================
+if page == "Overview":
+    # Use a real <img> element for the local traffic image. This is more
+    # reliable than a CSS background in Streamlit and also works on Cloud.
+    hero_image = ""
+    if BG_PATH and BG_PATH.exists():
+        encoded = base64.b64encode(BG_PATH.read_bytes()).decode("ascii")
+        mime = mimetypes.guess_type(BG_PATH.name)[0] or "image/png"
+        hero_image = (
+            f'<img class="hero-bg" src="data:{mime};base64,{encoded}" '
+            f'alt="Traffic background" />'
+        )
+
+    st.html(
+        f'''<div class="hero">
+            {hero_image}
+            <div class="hero-overlay"></div>
+            <div class="hero-content">
+                <div class="eyebrow">Traffic data analysis</div>
+                <h1>Traffic<br>Intelligence</h1>
+                <p>Explore historical traffic behavior, analyze patterns, test different models, and view the resulting next-day estimate.</p>
+                <div class="pill"><span class="dot"></span>Analysis system online</div>
+            </div>
+        </div>'''
+    )
+
+    st.markdown("### About the Data")
+    st.markdown('<div class="muted">Historical traffic and weather observations from the Metro Interstate Highway dataset.</div>', unsafe_allow_html=True)
+    try:
+        raw = raw_data(); start, end = raw.date_time.min(), raw.date_time.max()
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("Observations", f"{len(raw):,}"); c2.metric("Features", len(raw.columns)); c3.metric("Start", start.strftime("%b %Y")); c4.metric("End", end.strftime("%b %Y"))
+    except Exception:
+        pass
+
+    st.markdown("### What We Do")
+    cs=st.columns(4)
+    for c, item in zip(cs, [("01","Prepare","Clean and organize the raw data."),("02","Analyze","Study traffic trends and patterns."),("03","Compare","Test four predefined models."),("04","Estimate","Show the resulting next-day value.")]):
+        with c: card(*item)
+
+    st.markdown("### Data We Use")
+
+    cs = st.columns(5)
+
+    for c, item in zip(cs, [
+        ("", "Traffic", "Traffic volume recorded over time."),
+        ("", "Temperature", "Temperature at each observation."),
+        ("", "Weather", "Rain, snow and cloud information."),
+        ("", "Date & Time", "Used to study time-based patterns."),
+        ("", "Holiday", "Holiday information in the dataset.")
+    ]):
+        with c:
+            card(*item)
+        
+        
+    st.markdown("### Models Tested")
+    cs=st.columns(4)
+    for c,item in zip(cs,[("ARIMA","Statistical","Captures time-based behavior."),("SARIMA","Seasonal","Captures time and seasonal behavior."),("Prophet","Trend & seasonality","Models trend and recurring patterns."),("XGBoost","Machine learning","Learns from historical features.")]):
+        with c: model_card(*item)
+
+    st.markdown("### Project Flow")
+    st.html('<div class="flow"><span>Data</span><b>→</b><span>Preparation</span><b>→</b><span>Analysis</span><b>→</b><span>Models</span><b>→</b><span>Results</span></div>')
+
+
+# ============================================================
+# DATA ANALYSIS
+# ============================================================
+elif page == "Data Analysis":
+    st.title("Data Analysis")
+    st.caption("See how traffic changes across time and conditions.")
+    try: raw = raw_data()
+    except Exception as e: st.error(f"Could not load the dataset: {e}"); st.stop()
+
+    st.markdown("### Dataset Snapshot")
+    c1,c2,c3,c4=st.columns(4); c1.metric("Rows",f"{len(raw):,}"); c2.metric("Columns",len(raw.columns)); c3.metric("Missing Cells",f"{int(raw.isna().sum().sum()):,}"); c4.metric("Original Frequency","Hourly")
+
+    st.markdown("### Data Quality")
+    missing=raw.isna().sum().sort_values(ascending=False); missing=missing[missing>0]
+    if missing.empty: st.success("No missing values found in the raw dataset.")
+    else:
+        md=missing.reset_index(); md.columns=["Feature","Missing Values"]; md["Percentage"]=(md["Missing Values"]/len(raw)*100).round(2); st.dataframe(md,hide_index=True,width="stretch")
+
+    st.markdown("### Missing Data Handling")
 
     st.markdown(
-        "### 🧠 Models"
+        "**We first check the raw observations for missing values and time gaps.** "
+        "Traffic is aggregated from hourly observations to a daily series. "
+        "Missing daily values in the prepared series are filled using linear "
+        "interpolation to keep the analysis series continuous."
     )
 
-    for model in MODELS:
-
-        render_html(
-            f"""
-            <div style="
-                display:flex;
-                align-items:center;
-                gap:9px;
-                margin:11px 0;
-                color:rgba(255,255,255,0.48);
-                font-size:12px;
-            ">
-
-                <span style="
-                    width:7px;
-                    height:7px;
-                    border-radius:50%;
-                    background:#55dcff;
-                    box-shadow:0 0 9px #55dcff;
-                    flex-shrink:0;
-                "></span>
-
-                {model}
-
-            </div>
-            """
-        )
-
-    st.divider()
-
-    st.caption(
-        "Multi-Model Time-Series Forecasting"
-    )
-
-
-# HERO
-
-render_html(
-    """
-    <div class="hero">
-
-        <div class="hero-content">
-
-            <div class="hero-eyebrow">
-                INTELLIGENT MOBILITY ANALYTICS
-            </div>
-
-            <div class="hero-title">
-                Traffic Intelligence
-            </div>
-
-            <div class="hero-subtitle">
-                Predict traffic demand using advanced time-series
-                and machine-learning models. Compare forecasts,
-                evaluate model performance and understand traffic
-                patterns through interactive analytics.
-            </div>
-
-            <div class="online-badge">
-
-                <span class="online-dot"></span>
-
-                FORECASTING SYSTEM ONLINE
-
-            </div>
-
-        </div>
-
-    </div>
-    """
-)
-
-
-# OVERVIEW
-
-if page == "Overview":
-
-    render_html(
-        """
-        <div class="section-title">
-            📡 System Overview
-        </div>
-
-        <div class="section-description">
-            A unified view of the traffic forecasting pipeline.
-        </div>
-        """
-    )
-
-
-    # TOP METRICS
-
-    c1, c2, c3, c4 = st.columns(4)
-
-
-    with c1:
-
-        st.metric(
-            "🤖 Models",
-            len(available_models)
-        )
-
-
-    with c2:
-
-        st.metric(
-            "📉 Best MAE",
-            format_number(best_mae)
-        )
-
-
-    with c3:
-
-        best_rmse = None
-
-        if best_model:
-
-            best_rmse = get_metric(
-                metrics,
-                best_model,
-                "RMSE"
-            )
-
-        st.metric(
-            "📊 Best RMSE",
-            format_number(best_rmse)
-        )
-
-
-    with c4:
-
-        historical_days = 0
-
-        if not daily_data.empty:
-
-            date_column = get_date_column(
-                daily_data
-            )
-
-            if date_column:
-
-                historical_days = (
-                    daily_data[
-                        date_column
-                    ].dropna().nunique()
-                )
-
-        st.metric(
-            "📅 Historical Days",
-            f"{historical_days:,}"
-        )
-
-
-    # BEST MODEL
-
-    if best_model:
-
-        render_html(
-            f"""
-            <div class="best-model">
-
-                <div class="best-label">
-                    🏆 RECOMMENDED MODEL
-                </div>
-
-                <div class="best-name">
-                    {best_model}
-                </div>
-
-                <div class="best-description">
-                    Lowest MAE on the evaluation period
-                    &nbsp;•&nbsp;
-                    MAE: {best_mae:,.2f}
-                </div>
-
-            </div>
-            """
-        )
-
-
-    # TRAFFIC HISTORY
-
-    if not daily_data.empty:
-
-        date_column = get_date_column(
-            daily_data
-        )
-
-        if (
-            date_column
-            and
-            "traffic_volume"
-            in daily_data.columns
-        ):
-
-            has_interpolated_flag = (
-                "is_interpolated" in daily_data.columns
-            )
-
-            render_html(
-                """
-                <div class="section-title">
-                    📈 Traffic Through Time
-                </div>
-
-                <div class="section-description">
-                    Historical daily traffic volume."""
-                + (
-                    " The shaded band marks a long stretch of "
-                    "missing sensor data that was linearly "
-                    "interpolated, not observed."
-                    if has_interpolated_flag
-                    and daily_data["is_interpolated"].sum() > 0
-                    else ""
-                )
-                + """
-                </div>
-                """
-            )
-
-
-            fig = go.Figure()
-
-
-            fig.add_trace(
-                go.Scatter(
-                    x=daily_data[
-                        date_column
-                    ],
-
-                    y=daily_data[
-                        "traffic_volume"
-                    ],
-
-                    mode="lines",
-
-                    name="Traffic Volume",
-
-                    line=dict(
-                        color="#5bdcff",
-                        width=2.2,
-                    ),
-
-                    fill="tozeroy",
-
-                    fillcolor=
-                        "rgba(91,220,255,0.07)",
-
-                    hovertemplate=
-                        "<b>%{x|%d %b %Y}</b>"
-                        "<br>"
-                        "Traffic: %{y:,.0f}"
-                        "<extra></extra>",
-                )
-            )
-
-
-            # Shade any interpolated (non-observed) stretches
-            # instead of letting them look like real history.
-            if (
-                has_interpolated_flag
-                and daily_data["is_interpolated"].sum() > 0
-            ):
-
-                flags = daily_data["is_interpolated"].astype(int).values
-                dates = daily_data[date_column].values
-
-                group_id = (
-                    pd.Series(flags)
-                    .diff()
-                    .fillna(1)
-                    .ne(0)
-                    .cumsum()
-                )
-
-                span_df = pd.DataFrame(
-                    {
-                        "flag": flags,
-                        "date": dates,
-                        "group": group_id,
-                    }
-                )
-
-                for _, span in span_df[
-                    span_df["flag"] == 1
-                ].groupby("group"):
-
-                    fig.add_vrect(
-                        x0=span["date"].min(),
-                        x1=span["date"].max(),
-                        fillcolor="rgba(255,180,80,0.15)",
-                        line_width=0,
-                    )
-
-
-            fig.update_layout(
-                height=440,
-
-                margin=dict(
-                    l=15,
-                    r=15,
-                    t=15,
-                    b=15,
-                ),
-
-                paper_bgcolor=
-                    "rgba(0,0,0,0)",
-
-                plot_bgcolor=
-                    "rgba(0,0,0,0)",
-
-                font=dict(
-                    color=
-                        "rgba(255,255,255,0.65)"
-                ),
-
-                xaxis=dict(
-                    showgrid=False,
-
-                    zeroline=False,
-                ),
-
-                yaxis=dict(
-                    showgrid=True,
-
-                    gridcolor=
-                        "rgba(255,255,255,0.05)",
-
-                    zeroline=False,
-                ),
-
-                hovermode="x unified",
-            )
-
-
-            st.plotly_chart(
-                fig,
-                width="stretch",
-            )
-
-
-    # MODEL PERFORMANCE CARDS
-
-    render_html(
-        """
-        <div class="section-title">
-            🧠 Model Performance
-        </div>
-
-        <div class="section-description">
-            Comparison of the four forecasting approaches.
-        </div>
-        """
-    )
-
-
-    if available_models:
-
-        cols = st.columns(
-            len(available_models)
-        )
-
-
-        descriptions = {
-
-            "ARIMA":
-                "Autoregressive integrated forecasting",
-
-            "SARIMA":
-                "Seasonal time-series forecasting",
-
-            "Prophet":
-                "Trend and seasonality forecasting",
-
-            "XGBoost":
-                "Gradient boosting with lag features",
-        }
-
-
-        for index, model in enumerate(
-            available_models
-        ):
-
-            mae = get_metric(
-                metrics,
-                model,
-                "MAE"
-            )
-
-            rmse = get_metric(
-                metrics,
-                model,
-                "RMSE"
-            )
-
-
-            with cols[index]:
-
-                render_html(
-                    f"""
-                    <div class="model-card">
-
-                        <div class="model-name">
-                            {model}
-                        </div>
-
-                        <div class="model-value">
-                            {format_number(mae)}
-                        </div>
-
-                        <div class="model-description">
-                            MAE
-                            <br>
-                            RMSE:
-                            {format_number(rmse)}
-                            <br>
-                            {descriptions[model]}
-                        </div>
-
-                    </div>
-                    """
-                )
-
-
-# FORECAST
-
-elif page == "Forecast":
-
-    render_html(
-        """
-        <div class="section-title">
-            🔮 Traffic Forecast
-        </div>
-
-        <div class="section-description">
-            Generate a next-day traffic prediction using every
-            trained model.
-        </div>
-        """
-    )
-
-
-    left, right = st.columns(
-        [3, 1]
-    )
-
-
-    with left:
-
-        st.info(
-            "ARIMA • SARIMA • Prophet • XGBoost "
-            "will all generate an independent forecast."
-        )
-
-
-    with right:
-
-        predict_clicked = st.button(
-            "🚀 Predict Next Day",
-            width="stretch",
-        )
-
-
-    # RUN PREDICTION
-
-    if predict_clicked:
-
-        with st.spinner(
-            "Running all forecasting models..."
-        ):
-
+    try:
+        daily=daily_data(); dc=col(daily,["date","date_time","ds"]); tc=col(daily,["traffic_volume","traffic","y","value"])
+        daily=daily.dropna(subset=[dc,tc]).sort_values(dc).copy(); daily[dc]=pd.to_datetime(daily[dc],errors="coerce")
+        st.markdown("### Traffic Over Time"); st.caption("Daily traffic volume across the prepared dataset.")
+        fig=px.line(daily,x=dc,y=tc,template="plotly_dark"); fig.update_layout(height=430,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Traffic Volume"); st.plotly_chart(fig,width="stretch")
+        daily["day_of_week"]=daily[dc].dt.day_name(); daily["month"]=daily[dc].dt.month_name()
+
+        st.markdown("### Weekly Pattern"); st.caption("Average traffic by day of the week.")
+        order=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+        weekly=daily.groupby("day_of_week")[tc].mean().reindex(order).reset_index(); fig=px.bar(weekly,x="day_of_week",y=tc,template="plotly_dark"); fig.update_layout(height=340,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Average Traffic"); st.plotly_chart(fig,width="stretch")
+
+        st.markdown("### Monthly Pattern"); st.caption("Average traffic by month.")
+        mo=["January","February","March","April","May","June","July","August","September","October","November","December"]
+        monthly=daily.groupby("month")[tc].mean().reindex(mo).reset_index(); fig=px.bar(monthly,x="month",y=tc,template="plotly_dark"); fig.update_layout(height=340,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Average Traffic"); st.plotly_chart(fig,width="stretch")
+    except Exception as e: st.warning(f"Could not build daily charts: {e}")
+
+    st.markdown("### Weather & Traffic")
+    st.caption("Simple relationships between traffic and selected weather features.")
+    available=[("temp","Temperature"),("rain_1h","Rain"),("snow_1h","Snow"),("clouds_all","Cloud Cover")]
+    available=[x for x in available if x[0] in raw.columns]
+    cs=st.columns(2)
+    for i,(feature,label) in enumerate(available):
+        with cs[i%2]:
+            sample=raw[[feature,"traffic_volume"]].dropna(); sample=sample.sample(min(5000,len(sample)),random_state=42)
+            fig=px.scatter(sample,x=feature,y="traffic_volume",opacity=.35,template="plotly_dark"); fig.update_layout(title=label,height=330,margin=dict(l=10,r=10,t=45,b=10),xaxis_title=label,yaxis_title="Traffic Volume"); st.plotly_chart(fig,width="stretch")
+
+
+# ============================================================
+# MODEL ANALYSIS
+# ============================================================
+elif page == "Model Analysis":
+    st.title("Model Analysis")
+    st.caption("Four predefined models tested on the prepared traffic data.")
+    cs=st.columns(4)
+    for c,item in zip(cs,[("ARIMA","Statistical","Captures time-based behavior."),("SARIMA","Seasonal","Captures time and seasonal behavior."),("Prophet","Trend & seasonality","Models trend and recurring patterns."),("XGBoost","Machine learning","Learns from historical features.")]):
+        with c: model_card(*item)
+
+    m=metrics(); rows=[]
+    for model in ["ARIMA","SARIMA","Prophet","XGBoost"]: rows.append({"Model":model,"MAE":score(m,model,"MAE"),"RMSE":score(m,model,"RMSE"),"MAPE":score(m,model,"MAPE")})
+    df=pd.DataFrame(rows)
+    st.markdown("### Model Performance"); st.caption("Compare results on the held-out test period.")
+    display=df.copy()
+    for c in ["MAE","RMSE","MAPE"]: display[c]=display[c].map(lambda x:round(x,2) if pd.notna(x) else "—")
+    st.dataframe(display,hide_index=True,width="stretch")
+    if df["MAE"].notna().any():
+        chart=df.dropna(subset=["MAE"]); fig=px.bar(chart,x="Model",y="MAE",template="plotly_dark",text_auto=".1f"); fig.update_layout(height=370,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Mean Absolute Error"); st.plotly_chart(fig,width="stretch")
+        best=chart.loc[chart.MAE.idxmin()]; st.html(f'<div class="result"><div class="result-label">Lowest MAE in stored evaluation</div><div class="result-number">{best.Model}</div><div class="result-sub">MAE: {best.MAE:.2f}</div></div>')
+
+
+# ============================================================
+# NEXT-DAY RESULT
+# ============================================================
+elif page == "Next-Day Result":
+    st.title("Next-Day Result")
+    st.caption("View the next-day estimate produced by each tested model.")
+    st.markdown('<div class="muted">The values are model-generated results based on the available historical data.</div>',unsafe_allow_html=True)
+    st.write("")
+    if st.button("Generate Next-Day Result", type="primary"):
+        with st.spinner("Running the tested models..."):
             try:
-
-                predictions = (
-                    predict_all_models()
-                )
-
-                st.session_state[
-                    "predictions"
-                ] = predictions
-
-                st.success(
-                    "All forecasts generated successfully."
-                )
-
-            except Exception as error:
-                import traceback
-
-                st.error(f"Prediction failed: {type(error).__name__}: {error}")
-
-                with st.expander("🔍 Full error traceback"):
-                    st.code(traceback.format_exc())
-
-
-    # RESULTS
-
-    if "predictions" in st.session_state:
-
-        predictions = (
-            st.session_state[
-                "predictions"
-            ]
-        )
-
-
-        render_html(
-            """
-            <div class="section-title">
-                📊 Model Predictions
-            </div>
-
-            <div class="section-description">
-                Estimated traffic volume for the next day.
-            </div>
-            """
-        )
-
-
-        forecast_values = {}
-
-
-        descriptions = {
-
-            "ARIMA":
-                "Autoregressive forecasting",
-
-            "SARIMA":
-                "Seasonal forecasting",
-
-            "Prophet":
-                "Trend + seasonality",
-
-            "XGBoost":
-                "Gradient boosting",
-        }
-
-
-        cols = st.columns(4)
-
-
-        for index, model in enumerate(
-            MODELS
-        ):
-
-            value = predictions.get(
-                model
-            )
-
-
-            # Support different prediction
-            # dictionary formats.
-
-            if isinstance(
-                value,
-                dict
-            ):
-
-                value = value.get(
-                    "prediction",
-
-                    value.get(
-                        "forecast",
-                        None
-                    )
-                )
-
-
-            try:
-
-                if value is not None:
-
-                    value = float(value)
-
-                    forecast_values[
-                        model
-                    ] = value
-
-            except Exception:
-
-                value = None
-
-
-            with cols[index]:
-
-                render_html(
-                    f"""
-                    <div class="model-card">
-
-                        <div class="model-name">
-                            {model}
-                        </div>
-
-                        <div class="model-value">
-                            {format_number(value)}
-                        </div>
-
-                        <div class="model-description">
-                            {descriptions[model]}
-                        </div>
-
-                    </div>
-                    """
-                )
-
-
-        # FORECAST COMPARISON
-
-        if forecast_values:
-
-            render_html(
-                """
-                <div class="section-title">
-                    📈 Forecast Comparison
-                </div>
-
-                <div class="section-description">
-                    How the four models differ in their next-day
-                    traffic estimate.
-                </div>
-                """
-            )
-
-
-            fig = go.Figure()
-
-
-            fig.add_trace(
-                go.Bar(
-
-                    x=list(
-                        forecast_values.keys()
-                    ),
-
-                    y=list(
-                        forecast_values.values()
-                    ),
-
-                    text=[
-                        format_number(value)
-
-                        for value
-                        in forecast_values.values()
-                    ],
-
-                    textposition="outside",
-
-                    marker=dict(
-                        color=[
-                            "#45d8ff",
-                            "#6d7cff",
-                            "#b86cff",
-                            "#48e0a4",
-                        ]
-                    ),
-
-                    hovertemplate=
-                        "<b>%{x}</b>"
-                        "<br>"
-                        "Prediction: %{y:,.0f}"
-                        "<extra></extra>",
-                )
-            )
-
-
-            fig.update_layout(
-                height=440,
-
-                margin=dict(
-                    l=15,
-                    r=15,
-                    t=40,
-                    b=15,
-                ),
-
-                paper_bgcolor=
-                    "rgba(0,0,0,0)",
-
-                plot_bgcolor=
-                    "rgba(0,0,0,0)",
-
-                font=dict(
-                    color=
-                        "rgba(255,255,255,0.65)"
-                ),
-
-                xaxis=dict(
-                    showgrid=False
-                ),
-
-                yaxis=dict(
-                    showgrid=True,
-
-                    gridcolor=
-                        "rgba(255,255,255,0.05)"
-                ),
-
-                showlegend=False,
-            )
-
-
-            st.plotly_chart(
-                fig,
-                width="stretch",
-            )
-
-
-            # FORECAST SUMMARY
-
-            average_prediction = np.mean(
-                list(
-                    forecast_values.values()
-                )
-            )
-
-
-            highest_model = max(
-                forecast_values,
-                key=forecast_values.get
-            )
-
-
-            lowest_model = min(
-                forecast_values,
-                key=forecast_values.get
-            )
-
-
-            c1, c2, c3 = st.columns(3)
-
-
-            with c1:
-
-                st.metric(
-                    "Average Forecast",
-                    format_number(
-                        average_prediction
-                    )
-                )
-
-
-            with c2:
-
-                st.metric(
-                    "Highest Forecast",
-                    highest_model
-                )
-
-
-            with c3:
-
-                st.metric(
-                    "Lowest Forecast",
-                    lowest_model
-                )
-
-
-# MODEL EVALUATION
-
-elif page == "Model Evaluation":
-
-    render_html(
-        """
-        <div class="section-title">
-            🧠 Model Evaluation
-        </div>
-
-        <div class="section-description">
-            Performance on the held-out evaluation period.
-        </div>
-        """
-    )
-
-
-    # CREATE METRICS TABLE
-
-    rows = []
-
-
-    for model in MODELS:
-
-        if model not in metrics:
-            continue
-
-
-        rows.append(
-            {
-                "Model": model,
-
-                "MAE":
-                    get_metric(
-                        metrics,
-                        model,
-                        "MAE"
-                    ),
-
-                "RMSE":
-                    get_metric(
-                        metrics,
-                        model,
-                        "RMSE"
-                    ),
-
-                "MAPE":
-                    get_metric(
-                        metrics,
-                        model,
-                        "MAPE"
-                    ),
-            }
-        )
-
-
-    if rows:
-
-        metrics_df = pd.DataFrame(
-            rows
-        )
-
-
-        display_df = metrics_df.copy()
-
-
-        display_df["MAE"] = (
-            display_df["MAE"]
-            .apply(
-                lambda x:
-                    f"{x:,.2f}"
-                    if pd.notna(x)
-                    else "—"
-            )
-        )
-
-
-        display_df["RMSE"] = (
-            display_df["RMSE"]
-            .apply(
-                lambda x:
-                    f"{x:,.2f}"
-                    if pd.notna(x)
-                    else "—"
-            )
-        )
-
-
-        display_df["MAPE"] = (
-            display_df["MAPE"]
-            .apply(
-                lambda x:
-                    f"{x:.2f}%"
-                    if pd.notna(x)
-                    else "—"
-            )
-        )
-
-
-        st.dataframe(
-            display_df,
-
-            width="stretch",
-
-            hide_index=True,
-        )
-
-
-        # BAR CHART
-
-        render_html(
-            """
-            <div class="section-title">
-                🏆 Performance Comparison
-            </div>
-
-            <div class="section-description">
-                Lower MAE and RMSE indicate better predictive
-                performance.
-            </div>
-            """
-        )
-
-
-        fig = go.Figure()
-
-
-        fig.add_trace(
-            go.Bar(
-
-                name="MAE",
-
-                x=metrics_df[
-                    "Model"
-                ],
-
-                y=metrics_df[
-                    "MAE"
-                ],
-
-                marker_color="#52dfff",
-            )
-        )
-
-
-        fig.add_trace(
-            go.Bar(
-
-                name="RMSE",
-
-                x=metrics_df[
-                    "Model"
-                ],
-
-                y=metrics_df[
-                    "RMSE"
-                ],
-
-                marker_color="#7b6cff",
-            )
-        )
-
-
-        fig.update_layout(
-            barmode="group",
-
-            height=450,
-
-            margin=dict(
-                l=15,
-                r=15,
-                t=25,
-                b=15,
-            ),
-
-            paper_bgcolor=
-                "rgba(0,0,0,0)",
-
-            plot_bgcolor=
-                "rgba(0,0,0,0)",
-
-            font=dict(
-                color=
-                    "rgba(255,255,255,0.65)"
-            ),
-
-            xaxis=dict(
-                showgrid=False
-            ),
-
-            yaxis=dict(
-                showgrid=True,
-
-                gridcolor=
-                    "rgba(255,255,255,0.05)"
-            ),
-        )
-
-
-        st.plotly_chart(
-            fig,
-            width="stretch",
-        )
-
-
-    # ACTUAL VS PREDICTED
-
-    if not test_predictions.empty:
-
-        render_html(
-            """
-            <div class="section-title">
-                📉 Actual vs Predicted
-            </div>
-
-            <div class="section-description">
-                Compare model predictions with actual observed
-                traffic during the evaluation period.
-            </div>
-            """
-        )
-
-
-        prediction_models = [
-
-            model
-
-            for model in MODELS
-
-            if model
-            in test_predictions.columns
-
-        ]
-
-
-        if prediction_models:
-
-            selected_model = st.selectbox(
-                "Select model",
-                prediction_models,
-                key="evaluation_model",
-            )
-
-
-            date_column = get_date_column(
-                test_predictions
-            )
-
-
-            actual_column = get_actual_column(
-                test_predictions
-            )
-
-
-            if (
-                date_column
-                and actual_column
-            ):
-
-                dates = pd.to_datetime(
-                    test_predictions[
-                        date_column
-                    ],
-                    errors="coerce",
-                )
-
-
-                actual = pd.to_numeric(
-                    test_predictions[
-                        actual_column
-                    ],
-                    errors="coerce",
-                )
-
-
-                predicted = pd.to_numeric(
-                    test_predictions[
-                        selected_model
-                    ],
-                    errors="coerce",
-                )
-
-
-                fig = go.Figure()
-
-
-                fig.add_trace(
-                    go.Scatter(
-
-                        x=dates,
-
-                        y=actual,
-
-                        mode="lines",
-
-                        name="Actual",
-
-                        line=dict(
-                            color="#ffffff",
-                            width=2.5,
-                        ),
-                    )
-                )
-
-
-                fig.add_trace(
-                    go.Scatter(
-
-                        x=dates,
-
-                        y=predicted,
-
-                        mode="lines",
-
-                        name=selected_model,
-
-                        line=dict(
-                            color="#54ddff",
-                            width=2,
-                            dash="dash",
-                        ),
-                    )
-                )
-
-
-                fig.update_layout(
-                    height=470,
-
-                    hovermode="x unified",
-
-                    margin=dict(
-                        l=15,
-                        r=15,
-                        t=20,
-                        b=15,
-                    ),
-
-                    paper_bgcolor=
-                        "rgba(0,0,0,0)",
-
-                    plot_bgcolor=
-                        "rgba(0,0,0,0)",
-
-                    font=dict(
-                        color=
-                            "rgba(255,255,255,0.65)"
-                    ),
-
-                    xaxis=dict(
-                        showgrid=False
-                    ),
-
-                    yaxis=dict(
-                        showgrid=True,
-
-                        gridcolor=
-                            "rgba(255,255,255,0.05)"
-                    ),
-                )
-
-
-                st.plotly_chart(
-                    fig,
-                    width="stretch",
-                )
-
-
-# DIAGNOSTICS
-
-elif page == "Diagnostics":
-
-    render_html(
-        """
-        <div class="section-title">
-            🔬 Forecast Diagnostics
-        </div>
-
-        <div class="section-description">
-            Inspect prediction errors and residual behaviour.
-        </div>
-        """
-    )
-
-
-    if not test_predictions.empty:
-
-        prediction_models = [
-
-            model
-
-            for model in MODELS
-
-            if model
-            in test_predictions.columns
-
-        ]
-
-
-        if prediction_models:
-
-            selected_model = st.selectbox(
-                "Diagnostic model",
-                prediction_models,
-                key="diagnostic_model",
-            )
-
-
-            date_column = get_date_column(
-                test_predictions
-            )
-
-
-            actual_column = get_actual_column(
-                test_predictions
-            )
-
-
-            if (
-                date_column
-                and actual_column
-            ):
-
-                dates = pd.to_datetime(
-                    test_predictions[
-                        date_column
-                    ],
-                    errors="coerce",
-                )
-
-
-                actual = pd.to_numeric(
-                    test_predictions[
-                        actual_column
-                    ],
-                    errors="coerce",
-                )
-
-
-                predicted = pd.to_numeric(
-                    test_predictions[
-                        selected_model
-                    ],
-                    errors="coerce",
-                )
-
-
-                residuals = (
-                    actual
-                    - predicted
-                )
-
-
-                # ERROR SUMMARY
-
-                c1, c2, c3, c4 = st.columns(4)
-
-
-                with c1:
-
-                    st.metric(
-                        "Mean Error",
-                        f"{residuals.mean():,.2f}"
-                    )
-
-
-                with c2:
-
-                    st.metric(
-                        "Std Error",
-                        f"{residuals.std():,.2f}"
-                    )
-
-
-                with c3:
-
-                    st.metric(
-                        "Maximum Error",
-                        f"{residuals.max():,.2f}"
-                    )
-
-
-                with c4:
-
-                    st.metric(
-                        "Minimum Error",
-                        f"{residuals.min():,.2f}"
-                    )
-
-
-                # RESIDUAL GRAPH
-
-                render_html(
-                    """
-                    <div class="section-title">
-                        📉 Residual Behaviour
-                    </div>
-
-                    <div class="section-description">
-                        Difference between actual and predicted
-                        traffic.
-                    </div>
-                    """
-                )
-
-
-                fig = go.Figure()
-
-
-                fig.add_trace(
-                    go.Scatter(
-
-                        x=dates,
-
-                        y=residuals,
-
-                        mode="lines+markers",
-
-                        name="Residual",
-
-                        line=dict(
-                            color="#ff6b9d",
-                            width=1.7,
-                        ),
-
-                        marker=dict(
-                            size=4,
-                        ),
-                    )
-                )
-
-
-                fig.add_hline(
-                    y=0,
-
-                    line_dash="dash",
-
-                    line_color=
-                        "rgba(255,255,255,0.35)",
-                )
-
-
-                fig.update_layout(
-                    height=410,
-
-                    margin=dict(
-                        l=15,
-                        r=15,
-                        t=20,
-                        b=15,
-                    ),
-
-                    paper_bgcolor=
-                        "rgba(0,0,0,0)",
-
-                    plot_bgcolor=
-                        "rgba(0,0,0,0)",
-
-                    font=dict(
-                        color=
-                            "rgba(255,255,255,0.65)"
-                    ),
-
-                    xaxis=dict(
-                        showgrid=False
-                    ),
-
-                    yaxis=dict(
-                        showgrid=True,
-
-                        gridcolor=
-                            "rgba(255,255,255,0.05)"
-                    ),
-                )
-
-
-                st.plotly_chart(
-                    fig,
-                    width="stretch",
-                )
-
-
-                # ERROR DISTRIBUTION
-
-                render_html(
-                    """
-                    <div class="section-title">
-                        📊 Error Distribution
-                    </div>
-
-                    <div class="section-description">
-                        Distribution of prediction errors.
-                    </div>
-                    """
-                )
-
-
-                error_df = pd.DataFrame(
-                    {
-                        "Residual":
-                            residuals.dropna()
-                    }
-                )
-
-
-                fig = px.histogram(
-                    error_df,
-
-                    x="Residual",
-
-                    nbins=30,
-
-                    marginal="box",
-                )
-
-
-                fig.update_layout(
-                    height=410,
-
-                    margin=dict(
-                        l=15,
-                        r=15,
-                        t=20,
-                        b=15,
-                    ),
-
-                    paper_bgcolor=
-                        "rgba(0,0,0,0)",
-
-                    plot_bgcolor=
-                        "rgba(0,0,0,0)",
-
-                    font=dict(
-                        color=
-                            "rgba(255,255,255,0.65)"
-                    ),
-
-                    xaxis=dict(
-                        showgrid=False
-                    ),
-
-                    yaxis=dict(
-                        showgrid=True,
-
-                        gridcolor=
-                            "rgba(255,255,255,0.05)"
-                    ),
-                )
-
-
-                st.plotly_chart(
-                    fig,
-                    width="stretch",
-                )
-
-
-                # ERROR TABLE
-
-                with st.expander(
-                    "🔍 View detailed prediction errors"
-                ):
-
-                    error_table = pd.DataFrame(
-                        {
-                            "Date":
-                                dates,
-
-                            "Actual":
-                                actual,
-
-                            "Predicted":
-                                predicted,
-
-                            "Error":
-                                residuals,
-
-                            "Absolute Error":
-                                residuals.abs(),
-                        }
-                    )
-
-
-                    st.dataframe(
-                        error_table,
-
-                        width="stretch",
-
-                        hide_index=True,
-                    )
-
-
+                from src.predict import predict_all_models
+                result=predict_all_models(); pred=normalize_predictions(result)
+                if not pred: st.error("The models ran, but the returned result format could not be read by the interface.")
+                else: st.session_state["next_day_predictions"]=pred
+            except ModuleNotFoundError as e:
+                st.error("The project source folder could not be imported. This usually happens when Streamlit is started from the wrong folder. The app now adds the project root automatically; restart Streamlit after replacing app.py.")
+            except Exception as e:
+                st.error(f"Could not generate the next-day result: {type(e).__name__}: {e}")
+    pred=st.session_state.get("next_day_predictions")
+    if pred:
+        avg=sum(pred.values())/len(pred)
+        c1,c2=st.columns([1.1,1])
+        with c1: st.html(f'<div class="result"><div class="result-label">Combined view</div><div class="result-number">{avg:,.0f}</div><div class="result-sub">Average of available model results</div></div>')
+        with c2: st.dataframe(pd.DataFrame({"Model":list(pred),"Estimated Traffic":[round(v) for v in pred.values()]}),hide_index=True,width="stretch")
+        st.markdown("### Model Results")
+        rdf=pd.DataFrame({"Model":list(pred),"Estimated Traffic":list(pred.values())}); fig=px.bar(rdf,x="Model",y="Estimated Traffic",template="plotly_dark",text_auto=".0f"); fig.update_layout(height=400,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Traffic Volume"); st.plotly_chart(fig,width="stretch")
     else:
-
-        st.warning(
-            "Evaluation prediction data is not available."
-        )
+        st.caption("Click the button above to run all four tested models and display their individual results.")
 
 
-    # PIPELINE
-
-    render_html(
-        """
-        <div class="section-title">
-            ⚙️ Forecasting Pipeline
-        </div>
-
-        <div class="section-description">
-            End-to-end architecture of the deployed system.
-        </div>
-        """
-    )
-
-
-    pipeline = pd.DataFrame(
-        {
-            "Stage": [
-                "01",
-                "02",
-                "03",
-                "04",
-                "05",
-                "06",
-            ],
-
-            "Component": [
-                "Raw Data",
-                "Preprocessing",
-                "Feature Engineering",
-                "ML Models",
-                "Evaluation",
-                "Forecast",
-            ],
-
-            "Purpose": [
-                "Traffic dataset",
-                "Clean + resample",
-                "Lag + calendar features",
-                "ARIMA / SARIMA / Prophet / XGBoost",
-                "MAE / RMSE / MAPE",
-                "Next-day prediction",
-            ],
-        }
-    )
-
-
-    st.dataframe(
-        pipeline,
-
-        width="stretch",
-
-        hide_index=True,
-    )
-
-
-# FOOTER
-
-render_html(
-    """
-    <div class="footer">
-
-        🚦 <b>Traffic Intelligence</b>
-
-        &nbsp; • &nbsp;
-
-        Multi-Model Time-Series Forecasting
-
-        <br>
-
-        ARIMA
-        &nbsp;•&nbsp;
-        SARIMA
-        &nbsp;•&nbsp;
-        Prophet
-        &nbsp;•&nbsp;
-        XGBoost
-
-        <br>
-
-        Intelligent Mobility Analytics
-
-    </div>
-    """
-)
+# ============================================================
+# DIAGNOSTICS
+# ============================================================
+elif page == "Diagnostics":
+    st.title("Diagnostics")
+    st.caption("See how model results behave against observed traffic.")
+    p=test_predictions()
+    if p is None or p.empty: st.warning("No test prediction artifact was found in artifacts/test_predictions.csv.")
+    else:
+        actual=col(p,["actual","traffic_volume","y","actual_traffic"]); date=col(p,["date","date_time","ds","timestamp"]); models=[c for c in p.columns if c.lower() in {"arima","sarima","prophet","xgboost"}]
+        if actual and models:
+            x=date or "Index"
+            if not date: p=p.copy(); p["Index"]=range(len(p))
+            if date: p=p.copy(); p[date]=pd.to_datetime(p[date],errors="coerce")
+            fig=go.Figure(); fig.add_trace(go.Scatter(x=p[x],y=p[actual],mode="lines",name="Actual"))
+            for model in models: fig.add_trace(go.Scatter(x=p[x],y=p[model],mode="lines",name=model))
+            fig.update_layout(template="plotly_dark",height=470,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Traffic Volume"); st.plotly_chart(fig,width="stretch")
+            st.markdown("### Residuals"); st.caption("Residual = actual traffic − model result.")
+            chosen=st.selectbox("Choose a model",models); residual=pd.to_numeric(p[actual],errors="coerce")-pd.to_numeric(p[chosen],errors="coerce"); rd=pd.DataFrame({"Index":range(len(residual)),"Residual":residual}).dropna()
+            fig=px.line(rd,x="Index",y="Residual",template="plotly_dark"); fig.add_hline(y=0,line_dash="dash"); fig.update_layout(height=340,margin=dict(l=10,r=10,t=10,b=10),xaxis_title=None,yaxis_title="Residual"); st.plotly_chart(fig,width="stretch")
+            st.markdown("### Error Distribution"); fig=px.histogram(rd,x="Residual",nbins=40,template="plotly_dark"); fig.update_layout(height=340,margin=dict(l=10,r=10,t=10,b=10),xaxis_title="Residual",yaxis_title="Count"); st.plotly_chart(fig,width="stretch")
+        else: st.dataframe(p.head(20),hide_index=True,width="stretch")
+    st.markdown("### Interpretation")
+    st.markdown("Residuals show where model results differ from observed traffic. Patterns remaining in the residuals can indicate information that the model did not capture.")
