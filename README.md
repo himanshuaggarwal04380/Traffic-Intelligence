@@ -1,87 +1,102 @@
-# Traffic Intelligence — Metro Interstate Traffic Forecasting
+# 🚦 Traffic Intelligence — Traffic Volume Forecasting
 
-Daily traffic-volume forecasting for the Minnesota I-94 corridor
-(UCI "Metro Interstate Traffic Volume" dataset, 2012-2018, hourly,
-resampled to daily). Four models are trained and compared: ARIMA,
-SARIMA, Prophet, and XGBoost. A Streamlit dashboard visualizes
-historical traffic, model comparisons, and a next-day forecast.
+> An end-to-end Machine Learning system for forecasting daily traffic volume using statistical time-series models, Facebook Prophet, and XGBoost.
 
-## Setup
+[![Python](https://img.shields.io/badge/Python-3.10-blue?logo=python)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?logo=streamlit)](https://streamlit.io/)
+[![XGBoost](https://img.shields.io/badge/XGBoost-ML-orange)](https://xgboost.readthedocs.io/)
+[![Prophet](https://img.shields.io/badge/Prophet-Forecasting-purple)](https://facebook.github.io/prophet/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+---
 
-## Train / retrain all models
+## 🌆 Overview
 
-```bash
-python -m src.all_models
-```
+**Traffic Intelligence** is an end-to-end traffic forecasting platform designed to predict future traffic demand from historical traffic patterns.
 
-This is the **only** training entry point - it regenerates:
-- `models/*.json` / `models/*.joblib` - the four fitted models
-- `artifacts/metrics.json` - MAE / RMSE / MAPE on a 30-day holdout
-- `artifacts/test_predictions.csv` - per-day predictions vs. actuals on the holdout
-- `artifacts/daily_traffic.csv` - the daily series used for training, with an
-  `is_interpolated` column flagging days that were filled in rather than observed
+The project combines traditional statistical forecasting with modern machine learning techniques and provides an interactive **Streamlit dashboard** for exploring historical traffic, comparing models, analyzing predictions, and generating forecasts.
 
-## Evaluate the deployed model
+The system evaluates four different forecasting approaches:
 
-```bash
-python -m src.evaluation
-```
+- 📈 **ARIMA**
+- 📊 **SARIMA**
+- 🔮 **Prophet**
+- 🤖 **XGBoost**
 
-Re-scores the currently saved XGBoost model using the same feature
-pipeline it was trained with (`src.all_models.create_xgb_dataset`).
+The models are evaluated using real traffic data and compared using metrics such as **MAE, RMSE, and MAPE**.
 
-## Run the dashboard
+---
 
-```bash
-streamlit run app/app.py
-```
+## 🎯 Project Goals
 
-## Get a next-day forecast programmatically
+The main objectives of this project are to:
 
-```python
-from src.predict import predict_all_models
-predict_all_models()
-```
+- Analyze historical traffic patterns
+- Convert raw traffic observations into a usable daily time series
+- Perform time-series preprocessing and stationarity analysis
+- Build multiple forecasting models
+- Compare statistical and machine-learning approaches
+- Generate next-day traffic predictions
+- Visualize forecasting performance
+- Provide an interactive dashboard
+- Build a reusable ML project architecture
+- Deploy the forecasting application as a web application
 
-## Project layout
+---
 
-```
-src/
-  data_loader.py   - raw CSV loading + validation checks
-  all_models.py    - the single training pipeline for all 4 models (source of truth)
-  predict.py       - next-day inference using the saved models
-  evaluation.py    - re-scores the deployed XGBoost model
-app/app.py         - Streamlit dashboard
-models/            - saved model artifacts
-artifacts/         - metrics, holdout predictions, daily series
-data/raw/          - raw dataset
-```
+# 🧠 How It Works
 
-`src/all_models.py` is the single source of truth for feature
-engineering and training. Don't add a second training script with
-its own feature logic - a previous version of this project had one,
-and it silently produced a model with a different feature scale than
-`predict.py` was feeding it at inference time.
+The complete system follows an end-to-end ML pipeline:
 
-## Known data caveats
-
-- The raw sensor data has real gaps, the largest being **2014-08-09
-  to 2015-06-10 (~10 months)**. These are linearly interpolated so
-  the models get a continuous daily series. That stretch is *not*
-  observed data - it's flagged via `is_interpolated` in
-  `artifacts/daily_traffic.csv` and shaded in the dashboard's
-  history chart. Treat model behavior across that period with
-  appropriate skepticism.
-- `holiday` effects are modeled using the US holiday calendar in
-  Prophet (this is Minnesota traffic data, confirmed by the raw
-  `holiday` column values: Labor Day, MLK Day, Washington's
-  Birthday, Minnesota State Fair, etc.).
-- Reported holdout metrics reflect a single 30-day holdout at the
-  end of the series, not cross-validated performance. Treat them as
-  a rough guide, not a guarantee of production accuracy.
+```text
+                    ┌──────────────────────┐
+                    │   Raw Traffic Data   │
+                    │       CSV File       │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │   Data Processing    │
+                    │ Cleaning & Resampling│
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Feature Engineering  │
+                    │ Lags / Rolling /     │
+                    │ Calendar Features    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+          ┌───────┐        ┌────────┐       ┌────────┐
+          │ ARIMA │        │ SARIMA │       │Prophet │
+          └───┬───┘        └───┬────┘       └───┬────┘
+              │                │                │
+              └────────────────┼────────────────┘
+                               │
+                               ▼
+                         ┌───────────┐
+                         │  XGBoost  │
+                         └─────┬─────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Model Evaluation     │
+                    │ MAE / RMSE / MAPE    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Saved Model Artifacts │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │  Streamlit Dashboard │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    🚦 Next-Day Forecast
