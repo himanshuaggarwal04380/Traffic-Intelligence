@@ -455,21 +455,6 @@ A substantial gap exists in the original dataset. Future preprocessing
 should distinguish between short gaps and long missing periods instead
 of interpolating long gaps.
 
-### XGBoost Feature Leakage
-
-Rolling features should use only information available before the target
-observation:
-
-``` python
-history = df["traffic_volume"].shift(1)
-
-df["rolling_mean_3"] = history.rolling(3).mean()
-df["rolling_std_3"] = history.rolling(3).std()
-df["rolling_mean_7"] = history.rolling(7).mean()
-df["rolling_std_7"] = history.rolling(7).std()
-```
-
-Training and prediction should use the same feature-generation logic.
 
 ### Training Pipeline
 
