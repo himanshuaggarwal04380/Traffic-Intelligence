@@ -6,8 +6,5 @@ __pycache__/
 
 .env
 
-models/*.pkl
-models/*.joblib
-
 
 .vscode/
