@@ -1,12 +1,23 @@
 # TRAFFIC INTELLIGENCE
 # Premium Streamlit Traffic Forecasting Dashboard
 
+import sys
+from pathlib import Path
+
+# Streamlit only adds this script's own folder (app/) to the
+# import path, not the project root. Since src/ is a sibling
+# folder of app/, not inside it, "from src..." fails unless the
+# project root is added to the path manually first.
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parent.parent)
+)
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import json
 import base64
-from pathlib import Path
 
 import plotly.graph_objects as go
 import plotly.express as px
