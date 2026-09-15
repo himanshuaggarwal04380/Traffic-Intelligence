@@ -56,7 +56,7 @@ BG_PATH = find_background()
 st.html("""
 <style>
 .stApp{background:#0b0d10;color:#f5f7fa}.block-container{max-width:1180px;padding-top:2.2rem;padding-bottom:4rem}
-[data-testid="stSidebar"]{background:#0b0d10!important;border-right:1px solid rgba(255,255,255,.07)!important}
+[data-testid="stSidebar"]{background:#0b0d10!important;width:225px!important;min-width:225px!important;border-right:1px solid rgba(255,255,255,.07)!important}
 [data-testid="stSidebar"]>div:first-child{padding:.75rem .65rem}
 [data-testid="stSidebarContent"]{padding:0!important}
 .sidebar-brand{padding:1.15rem .55rem 2.1rem}
