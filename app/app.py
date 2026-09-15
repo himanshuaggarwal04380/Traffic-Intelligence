@@ -1572,10 +1572,12 @@ elif page == "Forecast":
                 )
 
             except Exception as error:
+                import traceback
 
-                st.error(
-                    f"Prediction failed: {error}"
-                )
+                st.error(f"Prediction failed: {type(error).__name__}: {error}")
+
+                with st.expander("🔍 Full error traceback"):
+                    st.code(traceback.format_exc())
 
 
     # RESULTS
